@@ -1,0 +1,26 @@
+{
+  "name": "test-skill",
+  "display_name": "测试Skill",
+  "description": "一个测试用的skill",
+  "steps": [
+    {
+      "tool": "read_data_file",
+      "input": "{{file_path}}",
+      "description": "加载数据文件"
+    },
+    {
+      "tool": "clean_data",
+      "input": "df.dropna()",
+      "description": "删除空值"
+    }
+  ],
+  "tags": [
+    "测试"
+  ],
+  "version": 1,
+  "param_hints": {
+    "file_path": "参数: file_path"
+  },
+  "created_at": "2026-07-25T04:58:57",
+  "updated_at": "2026-07-25T04:58:57"
+}

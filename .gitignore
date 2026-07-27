@@ -1,0 +1,30 @@
+# Python virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+
+# Environment variables (contains real secrets)
+.env
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Runtime-generated directories
+logs/
+backups/
+charts/
+workspace/
+
+# Raw data files (sensitive business data)
+raw/*
+!raw/.gitkeep
+
+# OS files
+Thumbs.db
+.DS_Store

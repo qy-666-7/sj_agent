@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>商品数据分析 Agent</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+:root {
+  --bg: #f5f5f5; --card: #fff; --text: #333; --sub: #999; --border: #e0e0e0;
+  --user-bubble: #1677ff; --user-text: #fff;
+  --tool-bg: #fffbe6; --tool-border: #ffe58f; --red: #ff4d4f;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); height:100vh; display:flex; flex-direction:column; max-width:1600px; margin:0 auto; width:100%; }
+
+.header { background:var(--card); border-bottom:1px solid var(--border); padding:10px 20px; display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.header h1 { font-size:16px; color:var(--text); }
+
+.layout { display:flex; flex:1; min-height:0; overflow:hidden; }
+.sidebar { width:220px; flex-shrink:0; background:var(--card); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+.sidebar-list { flex:1; overflow-y:auto; padding:8px; }
+.sidebar-item { padding:8px 10px; border-radius:6px; cursor:pointer; font-size:13px; margin-bottom:4px; color:var(--text); display:flex; align-items:center; justify-content:space-between; transition:background .15s; }
+.sidebar-item:hover { background:#f0f5ff; }
+.sidebar-item.active { background:#e6f0ff; color:var(--user-bubble); font-weight:600; }
+.sidebar-item .title { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-item .del { visibility:hidden; font-size:14px; color:var(--sub); margin-left:6px; flex-shrink:0; padding:2px 4px; border-radius:3px; }
+.sidebar-item:hover .del { visibility:visible; }
+.sidebar-item .del:hover { color:var(--red); background:#fff2f0; }
+.new-chat-btn { margin:8px; padding:8px 14px; border:1px dashed var(--border); border-radius:8px; cursor:pointer; font-size:13px; color:var(--user-bubble); background:var(--card); text-align:center; transition:all .2s; }
+.new-chat-btn:hover { border-color:var(--user-bubble); background:#f0f5ff; }
+
+.main { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
+
+/* ★ 每个对话一个容器，切换时只做显示/隐藏 */
+.conv-pane { position:absolute; inset:0; display:flex; flex-direction:column; }
+.conv-pane:not(.active) { display:none; }
+
+.chat { flex:1; overflow-y:auto; padding:14px 20px; display:flex; flex-direction:column; gap:12px; }
+
+.bubble { max-width:90%; padding:10px 14px; border-radius:10px; line-height:1.65; font-size:14px; animation:fadeIn .3s; }
+.bubble.user { align-self:flex-end; background:var(--user-bubble); color:var(--user-text); border-bottom-right-radius:3px; }
+.bubble.ai { align-self:flex-start; background:#fff; border:1px solid var(--border); border-bottom-left-radius:3px; width:100%; }
+.bubble.ai table { border-collapse:collapse; margin:8px 0; font-size:13px; width:100%; }
+.bubble.ai th,.bubble.ai td { border:1px solid var(--border); padding:5px 8px; text-align:left; }
+.bubble.ai th { background:#fafafa; font-weight:600; }
+.bubble.ai tr:nth-child(even) { background:#fafafa; }
+.bubble.ai code { background:#f5f5f5; padding:1px 4px; border-radius:3px; font-size:13px; }
+.bubble.ai pre { background:#f5f5f5; padding:8px; border-radius:6px; overflow-x:auto; margin:6px 0; }
+.bubble.ai ul,.bubble.ai ol { padding-left:20px; }
+.bubble.ai p { margin:3px 0; }
+.bubble.ai strong { font-weight:600; }
+.bubble.ai img { max-width:100%; border-radius:8px; margin:10px 0; box-shadow:0 2px 8px rgba(0,0,0,.1); border:1px solid var(--border); }
+.bubble.ai iframe { width:100%; min-height:520px; border:1px solid var(--border); border-radius:8px; margin:10px 0; background:#fff; }
+.bubble.tool { align-self:flex-start; background:var(--tool-bg); border:1px solid var(--tool-border); border-radius:6px; font-size:12px; color:#8c6d00; font-family:"JetBrains Mono","Consolas",monospace; max-width:92%; }
+.bubble.think { align-self:flex-start; background:#f0f5ff; border:1px solid #b3d4ff; border-radius:8px; font-size:12px; color:#4a6fa5; max-width:95%; white-space:pre-wrap; line-height:1.6; }
+.bubble.think .think-header { font-size:11px; color:#7a9cc6; margin-bottom:4px; font-weight:600; letter-spacing:.5px; }
+.bubble.action { align-self:flex-start; background:#f6ffed; border:1px solid #b7eb8f; border-radius:8px; font-size:12px; color:#3f6600; max-width:95%; display:flex; flex-direction:column; gap:4px; }
+.bubble.action .action-tool { font-weight:700; font-size:13px; color:#237804; }
+.bubble.action .action-input { font-family:"JetBrains Mono","Consolas",monospace; font-size:11px; background:#fff; border:1px solid #d9f7be; border-radius:4px; padding:6px 8px; white-space:pre-wrap; max-height:120px; overflow-y:auto; }
+.bubble.error { align-self:flex-start; background:#fff2f0; border:1px solid #ffccc7; color:var(--red); font-size:13px; }
+.token-badge { display:inline-block; font-size:10px; background:#e8e8e8; color:#888; padding:1px 6px; border-radius:8px; margin-left:5px; font-weight:400; vertical-align:middle; }
+.token-summary { font-size:12px; color:#aaa; padding:4px 0 8px 0; border-bottom:1px dashed var(--border); margin-bottom:6px; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} }
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--user-bubble); border-radius:50%; animation:spin .6s linear infinite; margin-right:6px; vertical-align:middle; }
+@keyframes spin { to{transform:rotate(360deg)} }
+
+.input-row { background:var(--card); border-top:1px solid var(--border); padding:10px 20px; display:flex; gap:8px; flex-shrink:0; }
+.input-row input { flex:1; border:1px solid var(--border); border-radius:8px; padding:9px 12px; font-size:14px; outline:none; transition:border .2s; }
+.input-row input:focus { border-color:var(--user-bubble); }
+.input-row button { background:var(--user-bubble); color:#fff; border:none; border-radius:8px; padding:9px 18px; font-size:14px; cursor:pointer; transition:opacity .2s; }
+.input-row button:hover { opacity:.85; }
+.input-row button:disabled { opacity:.5; cursor:not-allowed; }
+
+/* ── Skills 侧边栏 ──────────────────────────────── */
+.skills-section { border-top:1px solid var(--border); margin-top:6px; padding-top:6px; flex-shrink:0; }
+.skills-header { padding:6px 10px; cursor:pointer; font-size:13px; color:var(--text); display:flex; justify-content:space-between; align-items:center; user-select:none; }
+.skills-header:hover { background:#f0f5ff; border-radius:6px; }
+.skills-arrow { font-size:10px; transition:transform .2s; }
+.skills-list { padding:2px 4px; max-height:180px; overflow-y:auto; }
+.skill-row { padding:5px 8px; border-radius:6px; cursor:pointer; font-size:12px; display:flex; align-items:center; gap:4px; margin-bottom:2px; }
+.skill-row:hover { background:#f5f5f5; }
+.skill-row .skill-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+.skill-row .skill-tags { font-size:10px; color:var(--sub); }
+.skill-row .skill-actions { display:flex; gap:2px; visibility:hidden; }
+.skill-row:hover .skill-actions { visibility:visible; }
+.skill-row .skill-actions button { font-size:11px; padding:1px 5px; border:none; background:#f0f0f0; border-radius:3px; cursor:pointer; }
+.skill-row .skill-actions button:hover { background:#e0e0e0; }
+.skill-row .skill-actions button.danger:hover { background:#fff2f0; color:var(--red); }
+.import-skill-btn { margin:4px 8px 8px; padding:6px 10px; border:1px dashed var(--border); border-radius:6px; cursor:pointer; font-size:12px; color:var(--user-bubble); background:var(--card); text-align:center; width:calc(100% - 16px); transition:all .2s; }
+.import-skill-btn:hover { border-color:var(--user-bubble); background:#f0f5ff; }
+
+/* ── 录制按钮 ───────────────────────────────────── */
+.rec-btn { background:transparent; color:var(--sub); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:14px; cursor:pointer; transition:all .2s; flex-shrink:0; min-width:36px; }
+.rec-btn:hover { border-color:var(--red); color:var(--red); }
+.rec-btn.recording { background:#fff2f0; color:var(--red); border-color:var(--red); animation:pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+
+/* ── Skill Banner ──────────────────────────────── */
+.skill-banner { background:#e6f7ff; border:1px solid #91d5ff; border-radius:8px; margin:6px 16px; padding:6px 12px; font-size:13px; display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.skill-banner button { margin-left:auto; background:none; border:none; cursor:pointer; font-size:14px; color:#999; padding:2px 6px; border-radius:3px; }
+.skill-banner button:hover { color:var(--red); background:#fff2f0; }
+
+/* ── 模态框 ────────────────────────────────────── */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:9999; display:flex; align-items:center; justify-content:center; }
+.modal-content { background:var(--card); border-radius:12px; padding:20px 24px; max-width:640px; width:90%; max-height:85vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,.15); }
+.modal-content h3 { margin:0 0 14px; font-size:16px; color:var(--text); }
+.modal-content label { display:block; font-size:13px; font-weight:600; color:var(--text); margin:10px 0 4px; }
+.modal-content input[type="text"], .modal-content textarea, .modal-content select { width:100%; border:1px solid var(--border); border-radius:6px; padding:7px 10px; font-size:13px; outline:none; font-family:inherit; }
+.modal-content input:focus, .modal-content textarea:focus, .modal-content select:focus { border-color:var(--user-bubble); }
+.modal-content textarea { resize:vertical; min-height:50px; }
+.modal-content .step-row { display:flex; gap:6px; align-items:center; margin:6px 0; }
+.modal-content .step-row .step-num { font-size:12px; color:var(--sub); min-width:20px; text-align:center; font-weight:600; }
+.modal-content .step-row select { width:140px; flex-shrink:0; }
+.modal-content .step-row input { flex:1; min-width:0; }
+.modal-content .step-row .step-desc { width:120px; flex-shrink:0; }
+.modal-content .step-row button { background:none; border:none; color:var(--sub); cursor:pointer; font-size:16px; padding:2px 4px; }
+.modal-content .step-row button:hover { color:var(--red); }
+.modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
+.modal-buttons button { padding:7px 18px; border-radius:6px; font-size:13px; cursor:pointer; border:1px solid var(--border); background:var(--card); color:var(--text); }
+.modal-buttons button.primary { background:var(--user-bubble); color:#fff; border:none; }
+.modal-buttons button.primary:hover { opacity:.85; }
+.skill-selector-item { padding:10px 14px; border-radius:8px; cursor:pointer; font-size:14px; display:flex; align-items:center; gap:8px; margin-bottom:4px; transition:background .15s; }
+.skill-selector-item:hover { background:#f0f5ff; }
+.skill-selector-item .ss-name { font-weight:600; }
+.skill-selector-item .ss-desc { font-size:12px; color:var(--sub); }
+.skill-selector-item.blank { color:var(--sub); font-style:italic; }
+</style>
+</head>
+<body>
+
+<div class="header"><h1>📊 商品数据分析 Agent</h1></div>
+
+<div class="layout">
+  <div class="sidebar">
+    <button class="new-chat-btn" onclick="newChat()">＋ 新建对话</button>
+    <div class="sidebar-list" id="convList"></div>
+    <div class="skills-section">
+      <div class="skills-header" onclick="toggleSkills()">
+        <span>📋 Skills</span><span class="skills-arrow" id="skillsArrow">▼</span>
+      </div>
+      <div class="skills-list" id="skillsList"></div>
+      <button class="import-skill-btn" onclick="importSkill()">＋ 导入 Skill</button>
+    </div>
+  </div>
+
+  <div class="main" id="mainArea">
+    <!-- 对话容器动态生成 -->
+  </div>
+</div>
+
+<!-- Skill 编辑器模态框 -->
+<div class="modal-overlay" id="skillEditorOverlay" style="display:none;">
+  <div class="modal-content">
+    <h3>✏️ 编辑 Skill</h3>
+    <label>名称</label>
+    <input type="text" id="skillEditorName" placeholder="例: monthly-sales-cleanup" />
+    <label>显示名称</label>
+    <input type="text" id="skillEditorDisplay" placeholder="例: 月度销售数据清洗入库" />
+    <label>描述</label>
+    <textarea id="skillEditorDesc" placeholder="描述这个 Skill 的功能..." rows="2"></textarea>
+    <label>步骤 <span style="color:#999;font-size:12px;">（用 &#123;&#123;参数名&#125;&#125; 作为占位符）</span></label>
+    <div id="skillEditorSteps"></div>
+    <button onclick="addSkillStep()" style="margin:6px 0;padding:5px 12px;border:1px dashed var(--border);border-radius:6px;cursor:pointer;font-size:12px;color:var(--user-bubble);background:var(--card);">＋ 添加步骤</button>
+    <label>标签（逗号分隔）</label>
+    <input type="text" id="skillEditorTags" placeholder="例: 清洗, 入库, 销售" />
+    <div class="modal-buttons">
+      <button onclick="closeSkillEditor()">取消</button>
+      <button class="primary" onclick="saveSkillFromEditor()">💾 保存 Skill</button>
+    </div>
+  </div>
+</div>
+
+<!-- Skill 选择器模态框 -->
+<div class="modal-overlay" id="skillSelectorOverlay" style="display:none;">
+  <div class="modal-content" style="max-width:480px;">
+    <h3>📋 选择 Skill（可选）</h3>
+    <p style="font-size:13px;color:var(--sub);margin-bottom:12px;">为新对话绑定一个 Skill，AI 将按预设流程执行</p>
+    <div id="skillSelectorList"></div>
+    <div class="modal-buttons" style="margin-top:12px;">
+      <button onclick="closeSkillSelector()">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+marked.setOptions({ breaks:true, gfm:true });
+const API = "http://localhost:8000";
+const mainArea = document.getElementById("mainArea");
+const convList = document.getElementById("convList");
+
+// ── 数据层 ────────────────────────────────────────────────
+const CONV_INDEX = "chat_conv_index";
+const CONV_PREF  = "chat_conv_";
+
+function genId() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function getIndex() { try{return JSON.parse(localStorage.getItem(CONV_INDEX))||[]}catch{return[]} }
+function saveIndex(a) { localStorage.setItem(CONV_INDEX,JSON.stringify(a)); }
+function getMeta(id) { try{return JSON.parse(localStorage.getItem(CONV_PREF+id))||{}}catch{return{}} }
+function saveMeta(id,m) { localStorage.setItem(CONV_PREF+id,JSON.stringify(m)); if(!getIndex().includes(id)){const a=getIndex();a.unshift(id);saveIndex(a);} }
+function delMeta(id) { localStorage.removeItem(CONV_PREF+id); saveIndex(getIndex().filter(x=>x!==id)); }
+
+// ── DOM 层：每个对话独立容器 ──────────────────────────────
+let currentId = localStorage.getItem("chat_curr") || genId();
+localStorage.setItem("chat_curr", currentId);
+
+function getPane(id) { return document.getElementById("pane-"+id); }
+
+function createPane(id) {
+  if (getPane(id)) return getPane(id);
+  const meta = getMeta(id);
+  const skillBannerHtml = meta.skillName
+    ? `<div class="skill-banner" id="skillBanner-${id}">📋 已激活 Skill: <strong>${escHtml(meta.skillName)}</strong><button onclick="deactivateSkill('${id}')">✕</button></div>`
+    : `<div class="skill-banner" id="skillBanner-${id}" style="display:none;">📋 已激活 Skill: <strong id="skillBannerName-${id}"></strong><button onclick="deactivateSkill('${id}')">✕</button></div>`;
+  const html = `<div class="conv-pane" id="pane-${id}">
+    ${skillBannerHtml}
+    <div class="chat" id="chat-${id}"></div>
+    <div class="input-row">
+      <input id="input-${id}" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter')send('${id}')" />
+      <button id="recBtn-${id}" class="rec-btn" onclick="toggleRecord('${id}')" title="录制 Skill">🔴</button>
+      <button id="btn-${id}" onclick="send('${id}')">发送</button>
+    </div>
+  </div>`;
+  mainArea.insertAdjacentHTML("beforeend", html);
+  return getPane(id);
+}
+
+function chatEl(id)  { return document.getElementById("chat-"+id); }
+function inputEl(id) { return document.getElementById("input-"+id); }
+function btnEl(id)   { return document.getElementById("btn-"+id); }
+
+// ── 切换对话（只做显示/隐藏，不终止 SSE，不重建 DOM） ──
+function switchToConv(id) {
+  if (id === currentId) return;
+  saveChat(currentId);
+  const old = getPane(currentId); if (old) old.classList.remove("active");
+  currentId = id;
+  localStorage.setItem("chat_curr", id);
+  const pane = createPane(id);
+  pane.classList.add("active");
+  updateBtnUI(id);  // ★ 切换到新会话时更新按钮状态
+  const chat = chatEl(id);
+  const meta = getMeta(id);
+  if (chat && chat.children.length === 0) {
+    if (meta.messages && meta.messages.length > 0) {
+      // 有保存的消息 → 渲染出来
+      renderChatFor(id);
+    } else {
+      chat.innerHTML = '<div class="bubble ai">👋 输入你的问题开始分析吧！</div>';
+    }
+  }
+  renderSidebar();
+  inputEl(id)?.focus();
+  if (meta.messages && meta.messages.length > 0) {
+    restoreMemory(id, meta.messages);
+  }
+}
+
+async function newChat() {
+  let skills = [];
+  try {
+    const r = await fetch(`${API}/skills`);
+    const data = await r.json();
+    skills = data.skills || [];
+  } catch (e) {}
+
+  if (skills.length === 0) {
+    const id = genId();
+    saveMeta(id, { title: "新对话", messages: [] });
+    switchToConv(id);
+    return;
+  }
+
+  // 存储 skills 供选择器使用
+  window._skillSelectorSkills = skills;
+  showSkillSelector();
+}
+
+function selectSkillFromSelector(skillName) {
+  closeSkillSelector();
+  const id = genId();
+  saveMeta(id, {
+    title: skillName ? "Skill: " + skillName : "新对话",
+    messages: [],
+    skillName: skillName || null,
+  });
+  switchToConv(id);
+}
+
+function deleteConv(id) {
+  if (!confirm("确定删除这条对话？")) return;
+  delMeta(id);
+  if (id === currentId) {
+    const idx = getIndex();
+    if (idx.length>0) switchToConv(idx[0]);
+    else newChat();
+  }
+  if (getPane(id)) getPane(id).remove();
+  renderSidebar();
+}
+
+// ── 渲染 ──────────────────────────────────────────────────
+function renderChatFor(id) {
+  const pane = createPane(id);
+  const chat = chatEl(id);
+  if (!chat) return;
+  chat.innerHTML = "";
+  const meta = getMeta(id);
+  const msgs = meta.messages||[];
+  if (msgs.length===0) {
+    chat.innerHTML = '<div class="bubble ai">👋 输入你的问题开始分析吧！</div>';
+    return;
+  }
+  for (const m of msgs) {
+    try {
+      const div = document.createElement("div");
+      div.className = "bubble " + m.type;
+      if (m.type==="user") div.textContent = m.text;
+      else div.innerHTML = m.html;
+      chat.appendChild(div);
+      // 还原 iframe
+      if (m.type==="ai") {
+        div.querySelectorAll("a").forEach(link=>{
+          const h=link.getAttribute("href")||"";
+          if(!h.endsWith(".html")||!h.includes("/charts/"))return;
+          const f=document.createElement("iframe");
+          f.src=h.startsWith("http")?h:API+h;
+          f.style.cssText="width:100%;height:520px;border:1px solid #e0e0e0;border-radius:8px;margin:10px 0;background:#fff;";
+          link.replaceWith(f);
+        });
+      }
+    } catch {}
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function renderSidebar() {
+  const idx = getIndex();
+  convList.innerHTML = idx.map(id=>{
+    const m=getMeta(id);
+    const dot = isRunning(id) ? ' 🟢' : '';
+    return `<div class="sidebar-item${id===currentId?' active':''}" onclick="switchToConv('${id}')">
+      <span class="title">${escHtml((m.title||"新对话")+dot)}</span>
+      <span class="del" onclick="event.stopPropagation();deleteConv('${id}')">✕</span>
+    </div>`;
+  }).join("");
+}
+
+function escHtml(s){const d=document.createElement("div");d.textContent=s;return d.innerHTML;}
+
+function formatTokens(n) {
+  if (n >= 10000) return Math.round(n/1000) + 'K';
+  if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+// ── 持久化 ────────────────────────────────────────────────
+function saveChat(id) {
+  if (!id) return;
+  const chat = chatEl(id); if (!chat) return;
+  const msgs=[];
+  for (const el of chat.children) {
+    if (el.classList.contains("user")) msgs.push({type:"user",text:el.textContent});
+    else if (el.classList.contains("ai")) msgs.push({type:"ai",html:el.innerHTML});
+  }
+  if (msgs.length===0) return;
+  const meta=getMeta(id);
+  meta.messages=msgs;
+  meta.title=guessTitle(msgs);
+  saveMeta(id,meta);
+}
+
+function saveCurrentConv() { saveChat(currentId); }
+
+function addMsg(id, type, content) {
+  const chat = chatEl(id); if (!chat) return null;
+  const div = document.createElement("div");
+  div.className = "bubble "+type;
+  if (type==="user") div.textContent = content;
+  else div.innerHTML = content;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function guessTitle(msgs) {
+  for (const m of msgs) if (m.type==="user"&&m.text) return m.text.slice(0,30)+(m.text.length>30?"…":"");
+  return "新对话";
+}
+
+async function restoreMemory(id, messages) {
+  const history=[];
+  for(const m of messages) {
+    if(m.type==="user") history.push({role:"user",content:m.text});
+    else {const d=document.createElement("div");d.innerHTML=m.html;history.push({role:"assistant",content:d.textContent||""});}
+  }
+  if(!history.length)return;
+  try{await fetch(`${API}/chat/restore`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:id,messages:history})})}catch{}
+}
+
+// ── Skills CRUD ─────────────────────────────────────────
+async function loadSkills() {
+  const list = document.getElementById("skillsList");
+  if (!list) return;
+  try {
+    const r = await fetch(`${API}/skills`);
+    const data = await r.json();
+    const skills = data.skills || [];
+    if (skills.length === 0) {
+      list.innerHTML = '<div style="padding:6px 10px;font-size:12px;color:var(--sub);">暂无保存的 Skill</div>';
+      return;
+    }
+    list.innerHTML = skills.map(s => {
+      const tags = (s.tags||[]).slice(0,2).map(t => `<span class="skill-tags">${escHtml(t)}</span>`).join(" ");
+      return `<div class="skill-row" onclick="useSkill('${escHtml(s.name)}')" title="${escHtml(s.description||'')}">
+        <span class="skill-name">${escHtml(s.display_name||s.name)}</span>${tags}
+        <span class="skill-actions">
+          <button title="导出" onclick="event.stopPropagation();exportSkill('${escHtml(s.name)}')">⬇</button>
+          <button title="删除" class="danger" onclick="event.stopPropagation();deleteSkill('${escHtml(s.name)}')">✕</button>
+        </span>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    list.innerHTML = '<div style="padding:6px 10px;font-size:12px;color:var(--red);">加载失败</div>';
+  }
+}
+
+async function deleteSkill(name) {
+  if (!confirm("确定删除 Skill: " + name + "？")) return;
+  try {
+    await fetch(`${API}/skills/${encodeURIComponent(name)}`, { method: "DELETE" });
+    loadSkills();
+  } catch (e) { alert("删除失败: " + e.message); }
+}
+
+function exportSkill(name) {
+  window.open(`${API}/skills/${encodeURIComponent(name)}/export`, "_blank");
+}
+
+function importSkill() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json,.skill.json";
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const resp = await fetch(`${API}/skills/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (resp.ok) { loadSkills(); }
+      else { const err = await resp.json(); alert("导入失败: " + (err.detail || "")); }
+    } catch (err) { alert("导入失败: " + err.message); }
+  };
+  input.click();
+}
+
+function useSkill(name) {
+  const id = genId();
+  saveMeta(id, { title: "Skill: " + name, messages: [], skillName: name });
+  switchToConv(id);
+}
+
+function deactivateSkill(id) {
+  const meta = getMeta(id);
+  meta.skillName = null;
+  saveMeta(id, meta);
+  const banner = document.getElementById("skillBanner-" + id);
+  if (banner) banner.style.display = "none";
+}
+
+function toggleSkills() {
+  const list = document.getElementById("skillsList");
+  const arrow = document.getElementById("skillsArrow");
+  if (!list || !arrow) return;
+  if (list.style.display === "none") {
+    list.style.display = "block";
+    arrow.textContent = "▲";
+  } else {
+    list.style.display = "none";
+    arrow.textContent = "▼";
+  }
+}
+
+// ── Skill 编辑器 ───────────────────────────────────────
+const TOOL_OPTIONS = [
+  "read_data_file","clean_data","export_data_file","merge_file",
+  "import_data_to_db","sql_to_dataframe","generate_chart",
+  "query_loaded_data","copy_to_workspace","undo",
+];
+
+function showSkillEditor(convId, steps) {
+  const overlay = document.getElementById("skillEditorOverlay");
+  if (!overlay) return;
+  document.getElementById("skillEditorName").value = "";
+  document.getElementById("skillEditorDisplay").value = "";
+  document.getElementById("skillEditorDesc").value = "";
+  document.getElementById("skillEditorTags").value = "";
+  overlay.setAttribute("data-conv", convId);
+  renderStepRows(steps);
+  overlay.style.display = "flex";
+}
+
+function renderStepRows(steps) {
+  const container = document.getElementById("skillEditorSteps");
+  container.innerHTML = "";
+  if (steps.length === 0) {
+    addSkillStep();
+    return;
+  }
+  steps.forEach((s, i) => {
+    addSkillStepRow(s.tool || "", s.input || "", s.description || "");
+  });
+}
+
+function addSkillStepRow(tool, inp, desc) {
+  const container = document.getElementById("skillEditorSteps");
+  const idx = container.children.length + 1;
+  const options = TOOL_OPTIONS.map(t => `<option value="${t}" ${t===tool?"selected":""}>${t}</option>`).join("");
+  const row = document.createElement("div");
+  row.className = "step-row";
+  row.innerHTML = `<span class="step-num">${idx}</span>
+    <select class="step-tool">${options}</select>
+    <input class="step-input" placeholder="输入 (如 {{file_path}})" value="${escHtml(inp)}" />
+    <input class="step-desc" placeholder="描述" value="${escHtml(desc)}" />
+    <button onclick="this.parentElement.remove();renumberSteps();" title="删除">✕</button>`;
+  container.appendChild(row);
+}
+
+function addSkillStep() { addSkillStepRow("", "", ""); }
+
+function renumberSteps() {
+  const container = document.getElementById("skillEditorSteps");
+  if (!container) return;
+  const rows = container.querySelectorAll(".step-row .step-num");
+  rows.forEach((el, i) => { el.textContent = i + 1; });
+}
+
+function closeSkillEditor() {
+  document.getElementById("skillEditorOverlay").style.display = "none";
+}
+
+async function saveSkillFromEditor() {
+  const name = document.getElementById("skillEditorName").value.trim();
+  if (!name) { alert("请输入 Skill 名称"); return; }
+  const displayName = document.getElementById("skillEditorDisplay").value.trim();
+  const description = document.getElementById("skillEditorDesc").value.trim();
+  const tagsStr = document.getElementById("skillEditorTags").value.trim();
+
+  const stepRows = document.querySelectorAll("#skillEditorSteps .step-row");
+  const steps = [];
+  stepRows.forEach(row => {
+    const tool = row.querySelector(".step-tool").value;
+    const inp = row.querySelector(".step-input").value;
+    const desc = row.querySelector(".step-desc").value;
+    if (tool && inp) steps.push({ tool, input: inp, description: desc });
+  });
+  if (steps.length === 0) { alert("请至少添加一个步骤"); return; }
+
+  const tags = tagsStr ? tagsStr.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [];
+  const skillData = { name, display_name: displayName || name, description, steps, tags };
+
+  try {
+    const resp = await fetch(`${API}/skills`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(skillData),
+    });
+    if (resp.ok) {
+      closeSkillEditor();
+      loadSkills();
+    } else {
+      const err = await resp.json();
+      alert("保存失败: " + (err.detail || ""));
+    }
+  } catch (e) { alert("保存失败: " + e.message); }
+}
+
+// ── Skill 选择器 ───────────────────────────────────────
+function showSkillSelector() {
+  const overlay = document.getElementById("skillSelectorOverlay");
+  const list = document.getElementById("skillSelectorList");
+  if (!overlay || !list) return;
+  const skills = window._skillSelectorSkills || [];
+
+  let html = `<div class="skill-selector-item blank" onclick="selectSkillFromSelector(null)">
+    <span class="ss-name">⬜ 空白对话</span><span class="ss-desc">不使用 Skill</span>
+  </div>`;
+  skills.forEach(s => {
+    html += `<div class="skill-selector-item" onclick="selectSkillFromSelector('${escHtml(s.name)}')">
+      <span class="ss-name">📋 ${escHtml(s.display_name||s.name)}</span>
+      <span class="ss-desc">${escHtml((s.description||"")+(s.step_count?" ("+s.step_count+"步)":""))}</span>
+    </div>`;
+  });
+  list.innerHTML = html;
+  overlay.style.display = "flex";
+}
+
+function closeSkillSelector() {
+  const overlay = document.getElementById("skillSelectorOverlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+// ── 运行状态（每个对话独立） ──────────────────────────────
+const running = {};     // { convId: AbortController }
+function isRunning(id) { return id in running; }
+
+function setRunning(id, ctrl) {
+  running[id] = ctrl;
+  updateBtnUI(id);
+  renderSidebar();
+}
+function clearRunning(id) {
+  delete running[id];
+  updateBtnUI(id);
+  renderSidebar();
+}
+function stopConv(id) {
+  if (running[id]) { running[id].abort(); clearRunning(id); }
+}
+
+// ── 录制状态（每个对话独立） ──────────────────────────
+const recState = {};  // { convId: { active:bool, steps:[], startTime:null } }
+function getRecState(id) {
+  if (!recState[id]) recState[id] = { active: false, steps: [], startTime: null };
+  return recState[id];
+}
+function toggleRecord(id) {
+  const state = getRecState(id);
+  if (state.active) { stopRecording(id); }
+  else { startRecording(id); }
+}
+function startRecording(id) {
+  const state = getRecState(id);
+  state.active = true;
+  state.steps = [];
+  state.startTime = Date.now();
+  updateRecBtnUI(id);
+}
+function stopRecording(id) {
+  const state = getRecState(id);
+  state.active = false;
+  updateRecBtnUI(id);
+  if (state.steps.length > 0) { showSkillEditor(id, state.steps); }
+}
+function updateRecBtnUI(id) {
+  const btn = document.getElementById("recBtn-" + id);
+  if (!btn) return;
+  const state = getRecState(id);
+  if (state.active) {
+    btn.textContent = "⏹ 停止";
+    btn.classList.add("recording");
+  } else {
+    btn.textContent = "🔴";
+    btn.classList.remove("recording");
+  }
+}
+
+function updateBtnUI(id) {
+  const btn = btnEl(id); if (!btn) return;
+  if (isRunning(id)) {
+    btn.textContent = "⏹ 停止";
+    btn.style.background = "var(--red)";
+    btn.disabled = false;
+  } else {
+    btn.textContent = "发送";
+    btn.style.background = "var(--user-bubble)";
+    btn.disabled = false;
+  }
+}
+
+// ── 发送 ★核心：SSE 写入自己的 convId 容器 ──────────────
+async function send(id) {
+  const inp = inputEl(id); if (!inp) return;
+  const question = inp.value.trim();
+  if (!question) {
+    // 正在思考中 → 点击按钮变成"停止"
+    if (isRunning(id)) { stopConv(id); }
+    return;
+  }
+  if (isRunning(id)) return;                    // ★ 思考中禁止发送
+  if (btnEl(id)?.disabled) return;
+
+  const ctrl = new AbortController();
+  setRunning(id, ctrl);
+
+  inp.value = "";
+  addMsg(id, "user", question);
+  const aiDiv = addMsg(id, "ai", '<span class="spinner"></span> 思考中...');
+  if (!aiDiv) { clearRunning(id); return; }
+
+  try {
+    // 如果是 skill 会话的第一条消息，带上 skill_name
+    const meta = getMeta(id);
+    const body = { question, session_id: id };
+    if (meta.skillName && (!meta.messages || meta.messages.length === 0)) {
+      body.skill_name = meta.skillName;
+    }
+    const resp = await fetch(`${API}/chat/stream`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) { aiDiv.innerHTML="❌ 请求失败: HTTP "+resp.status; aiDiv.className="bubble error"; return; }
+    const reader = resp.body.getReader(), decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const {done,value} = await reader.read(); if (done) break;
+      buf += decoder.decode(value,{stream:true});
+      const lines = buf.split("\n"); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        let ev; try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+        const chat = chatEl(id); if (!chat || !isRunning(id)) continue;
+
+        if (ev.type==="llm_start") {
+            // 新一帧思考开始
+            const thinkDiv = addMsg(id, "think", '<span class="think-header">💭 ' + ev.data + '</span>');
+            if (thinkDiv) thinkDiv.setAttribute("data-round", ev.round||"");
+        }
+        else if (ev.type==="token_usage") {
+            // 每轮 LLM 思考的 token 消耗
+            const thinkBubble = chat.querySelector('.bubble.think[data-round="' + (ev.round||"") + '"]');
+            if (thinkBubble) {
+              const header = thinkBubble.querySelector('.think-header');
+              if (header && !header.querySelector('.token-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'token-badge';
+                badge.textContent = '🔢 ' + formatTokens(ev.total_tokens) + ' tokens';
+                header.appendChild(badge);
+              }
+            }
+        }
+        else if (ev.type==="token_summary") {
+            // 本轮对话总 token 消耗，存储后在 done 中展示
+            window._lastTokenSummary = ev;
+        }
+        else if (ev.type==="agent_action") {
+            // ★ LLM 选择了工具 → 显示推理 + 工具名 + 输入参数
+            const thinking = ev.thinking || "";
+            const toolLabel = ev.tool || "unknown";
+            const inputStr = ev.tool_input || "";
+            // 友好的中文工具名映射
+            const toolNameMap = {
+              "sql_db_query":"📊 SQL 查询数据库",
+              "sql_to_dataframe":"📥 加载数据到 DataFrame",
+              "query_loaded_data":"🔍 查询已加载数据",
+              "read_data_file":"📂 读取文件",
+              "clean_data":"🧹 数据清洗",
+              "generate_chart":"📈 生成图表",
+              "export_data_file":"💾 导出文件",
+              "import_data_to_db":"🗄️ 导入数据库",
+              "merge_file":"🔗 合并文件",
+              "undo":"↩️ 撤销操作",
+              "backup_database":"📋 备份数据库",
+              "restore_database":"♻️ 恢复数据库",
+              "copy_to_workspace":"📁 复制到工作区",
+            };
+            const friendlyName = toolNameMap[toolLabel] || ("🔧 "+toolLabel);
+
+            if (thinking) {
+              addMsg(id, "think", '<span class="think-header">💭 推理:</span>' + escHtml(thinking));
+            }
+            const actionHtml = '<div class="action-tool">🎯 选择工具: ' + escHtml(friendlyName) + '</div>'
+              + (inputStr ? '<div class="action-input">输入: ' + escHtml(inputStr) + '</div>' : '');
+            const actionDiv = addMsg(id, "action", actionHtml);
+
+            // ★ 录制模式下捕获步骤
+            const rs = getRecState(id);
+            if (rs.active && ev.tool) {
+              // 跳过探索性工具
+              const skipTools = ["list_files","sql_to_dataframe","query_loaded_data","generate_chart","backup_database","restore_database"];
+              if (!skipTools.includes(ev.tool)) {
+                rs.steps.push({ tool: ev.tool, input: ev.tool_input || "", description: "" });
+                if (actionDiv) actionDiv.style.borderLeft = "3px solid var(--red)";
+              }
+            }
+        }
+        else if (ev.type==="tool_start") {
+            addMsg(id, "tool", "⏳ 执行: " + escHtml(ev.tool||ev.data||""));
+        }
+        else if (ev.type==="tool_end") {
+            const data = ev.data || "";
+            const hint = ev.is_truncated ? " (已截断, 完整长度:"+ev.full_len+")" : "";
+            addMsg(id, "tool", "✅ 返回: " + escHtml(data) + hint);
+        }
+        else if (ev.type==="agent_finish") {
+            addMsg(id, "think", '<span class="think-header">✨ ' + escHtml(ev.data||"分析完成") + '</span>');
+        }
+        else if (ev.type==="error") addMsg(id, "error", "⚠️ "+ev.data);
+        else if (ev.type==="done") {
+          // token 汇总（本轮对话总消耗）
+          let summaryHtml = '';
+          if (window._lastTokenSummary) {
+            const ts = window._lastTokenSummary;
+            summaryHtml = '<div class="token-summary">🔢 本轮消耗: ' + formatTokens(ts.total_tokens) + ' tokens · ' + ts.rounds + ' 轮思考</div>';
+            window._lastTokenSummary = null;
+          }
+          aiDiv.innerHTML = summaryHtml + marked.parse(ev.data||"");
+          aiDiv.querySelectorAll("a").forEach(link=>{
+            const h=link.getAttribute("href")||"";
+            if(!h.endsWith(".html")||!h.includes("/charts/"))return;
+            const f=document.createElement("iframe");
+            f.src=h.startsWith("http")?h:API+h;
+            f.style.cssText="width:100%;height:520px;border:1px solid #e0e0e0;border-radius:8px;margin:10px 0;background:#fff;";
+            link.replaceWith(f);
+          });
+          aiDiv.querySelectorAll('img[src^="/charts/"]').forEach(img=>{img.src=API+img.getAttribute("src");});
+          saveChat(id);
+          renderSidebar();
+        }
+      }
+    }
+  } catch(e) {
+    if (e.name==="AbortError") { /* 用户手动停止或切换中止 */ }
+    else { aiDiv.innerHTML="❌ 连接失败: "+e.message; aiDiv.className="bubble error"; }
+  } finally {
+    clearRunning(id);
+    saveChat(id);
+    renderSidebar();
+  }
+}
+
+// ── 启动 ──────────────────────────────────────────────────
+createPane(currentId);
+getPane(currentId)?.classList.add("active");
+renderSidebar();
+renderChatFor(currentId);
+loadSkills();
+const initMeta = getMeta(currentId);
+if (initMeta.messages && initMeta.messages.length>0) restoreMemory(currentId, initMeta.messages);
+</script>
+</body>
+</html>
